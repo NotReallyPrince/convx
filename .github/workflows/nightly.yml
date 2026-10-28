@@ -1,16 +1,8 @@
 name: Nightly GMS Release Build
 
+# Manual only: releases come from version tags (release.yml), not from every push.
 on:
-  push:
-    branches: [ 'main' ]
-    paths-ignore:
-      - 'README.md'
-      - 'fastlane/**'
-      - 'assets/**'
-      - '.github/**/*.md'
-  schedule:
-    - cron: '0 0 * * *' # Every night at 00:00 UTC
-  workflow_dispatch: # Allows manual triggering
+  workflow_dispatch:
 
 permissions:
   contents: write
