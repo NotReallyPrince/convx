@@ -615,13 +615,10 @@ private fun formatGitHubDate(githubDate: String): String = try {
 }
 
 /**
- * Release asset name for this install: convx-<version>-<abi>.apk. The buildType overwrites
- * ARCHITECTURE with "release", so the abi comes from the flavor. Universal is the arm64 build.
+ * Release asset name: each release publishes a single APK, convx-<version>.apk, built from the
+ * universal flavor, which carries arm64 only.
  */
-fun releaseApkName(tag: String): String {
-    val abi = BuildConfig.FLAVOR_abi.let { if (it == "universal") "arm64" else it }
-    return "convx-${tag.removePrefix("v")}-$abi.apk"
-}
+fun releaseApkName(tag: String): String = "convx-${tag.removePrefix("v")}.apk"
 
 fun isNewerVersion(latestVersion: String, currentVersion: String): Boolean {
     val latestVersionClean = latestVersion.removePrefix("b").removePrefix("v")

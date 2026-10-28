@@ -16,17 +16,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.convx.music.R
 import com.convx.music.ui.ios.compat.Text
-import com.convx.music.ui.utils.VibrantChromeInk
-import com.convx.music.ui.utils.vibrantChrome
 
 /**
  * Song / Video switch that sits at the top of the player when a video exists for the track.
- * The selected side carries the same vibrant chrome as the scrub rail.
+ * The selected side is filled with [color], the player's text colour, and labelled against it.
  */
 @Composable
 internal fun SongVideoModeControl(watchingVideo: Boolean, color: Color, onSelect: (Boolean) -> Unit) {
@@ -49,9 +48,13 @@ internal fun SongVideoModeControl(watchingVideo: Boolean, color: Color, onSelect
                 contentAlignment = Alignment.Center,
             ) {
                 if (selected) {
-                    Box(Modifier.matchParentSize().vibrantChrome().background(VibrantChromeInk, CircleShape))
+                    Box(Modifier.matchParentSize().background(color, CircleShape))
                 }
-                Text(stringResource(label), color = color, fontSize = 13.sp)
+                // The pill is a known colour, so its label can be picked against it. The old colour-dodged
+                // pill took its colour from the backdrop, came out near-white on light artwork, and hid the
+                // white label on it.
+                val labelColor = if (!selected) color else if (color.luminance() > 0.5f) Color.Black else Color.White
+                Text(stringResource(label), color = labelColor, fontSize = 13.sp)
             }
         }
     }
