@@ -349,6 +349,9 @@ class MusicService :
     @Inject
     lateinit var widgetManager: ConvxWidgetManager
 
+    @Inject
+    lateinit var deviceSyncPlayback: dagger.Lazy<com.convx.music.devicesync.DeviceSyncPlayback>
+
     private lateinit var audioManager: AudioManager
     private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
     private var audioFocusRequest: AudioFocusRequest? = null
@@ -620,6 +623,8 @@ class MusicService :
     override fun onCreate() {
         super.onCreate()
         isRunning = true
+        // Remote devices steer this player directly, so they keep working with the app's screen off.
+        deviceSyncPlayback.get().attachService(this)
 
         // Handle foreground promotion refusal through Media3's supported callback.
         // Qualify the listener because this service also implements Player.Listener.
@@ -3938,6 +3943,7 @@ class MusicService :
 
     override fun onDestroy() {
         isRunning = false
+        deviceSyncPlayback.get().attachService(null)
 
         try {
             unregisterReceiver(screenStateReceiver)

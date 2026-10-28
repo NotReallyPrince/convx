@@ -288,6 +288,9 @@ object YTPlayerUtils {
     /** Used when a player response omits streamingData.expiresInSeconds — 6h, YouTube's usual value. */
     private const val DEFAULT_STREAM_EXPIRY_SECONDS = 21600
 
+    /** Where capped stream URLs stop serving; see [validateStatus]. */
+    private const val CAPPED_STREAM_BYTES = 1024L * 1024L
+
     /**
      * Client used to fetch metadata (audioConfig, playbackTracking) when the user is
      * logged in. This ensures remote YouTube history is correctly updated.
@@ -992,7 +995,7 @@ object YTPlayerUtils {
                     break@clientLoop
                 }
 
-                if (validateStatus(streamUrl)) {
+                if (validateStatus(streamUrl, format?.contentLength)) {
                     Timber.tag(logTag).d("Stream validated successfully with client: ${currentClient.clientName}")
                     PlaybackLogManager.log(PlaybackLogLevel.INFO, "Stream validated", currentClient.clientName)
                     Timber.tag(TAG).i("Playback: client=${currentClient.clientName}, videoId=$videoId")
@@ -1008,7 +1011,7 @@ object YTPlayerUtils {
                             val nTransformed = CipherDeobfuscator.transformNParamInUrl(streamUrl)
                             if (nTransformed != streamUrl) {
                                 Timber.tag(logTag).d("CipherDeobfuscator n-transform applied, re-validating...")
-                                if (validateStatus(nTransformed)) {
+                                if (validateStatus(nTransformed, format?.contentLength)) {
                                     Timber.tag(logTag).d("N-transformed URL VALIDATED OK!")
                                     streamUrl = nTransformed
                                     nTransformWorked = true
@@ -1108,14 +1111,22 @@ object YTPlayerUtils {
             .onFailure { Timber.tag(logTag).e(it, "Failed to fetch metadata") }
     }
 
-    private fun validateStatus(url: String): Boolean {
+    /**
+     * Asks for one byte past [CAPPED_STREAM_BYTES] when the file is longer than that.
+     *
+     * Some clients' URLs serve the first mebibyte and refuse everything after it, so a check of
+     * byte 0 passed them and the song stopped about a minute in: the 403 re-resolved to the same
+     * client, which passed the same check, until the retries ran out.
+     */
+    private fun validateStatus(url: String, contentLength: Long?): Boolean {
         Timber.tag(logTag).d("Validating stream URL status")
+        val probeAt = if (contentLength != null && contentLength > CAPPED_STREAM_BYTES) CAPPED_STREAM_BYTES else 0L
         try {
             // Use a one-byte ranged GET: YouTube can accept HEAD for a stream it won't serve.
             val requestBuilder = okhttp3.Request.Builder()
                 .get()
                 .url(url)
-                .header("Range", "bytes=0-0")
+                .header("Range", "bytes=$probeAt-$probeAt")
                 .header("User-Agent", YouTubeClient.USER_AGENT_WEB)
 
             // Do NOT add Cookie header — googlevideo.com CDN rejects account cookies with 403.

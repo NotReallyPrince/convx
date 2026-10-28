@@ -16,9 +16,8 @@ import com.convx.music.extensions.metadata
 import com.convx.music.extensions.toMediaItem
 import com.convx.music.jam.JamManager
 import com.convx.music.listentogether.ListenTogetherManager
-import com.convx.music.listentogether.ListenTogetherPlayerConnectionBridge
 import com.convx.music.models.MediaMetadata
-import com.convx.music.playback.PlayerConnection
+import com.convx.music.playback.MusicService
 import com.convx.music.playback.queues.ListQueue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -84,7 +83,6 @@ data class SyncState(
 @Singleton
 class DeviceSyncPlayback @Inject constructor(
     private val client: DeviceSyncClient,
-    private val bridge: ListenTogetherPlayerConnectionBridge,
     private val listenTogether: dagger.Lazy<ListenTogetherManager>,
     private val jam: dagger.Lazy<JamManager>,
 ) {
@@ -135,7 +133,10 @@ class DeviceSyncPlayback @Inject constructor(
     private val pending = mutableMapOf<String, Pair<String, Job>>()
     private val applied = LinkedHashSet<String>()
 
-    private var attached: Pair<PlayerConnection, Player>? = null
+    // The service, not the app's screen: commands must still land with the screen off.
+    private var service: MusicService? = null
+    private var player: Player? = null
+    private var playerJob: Job? = null
     private var started = false
 
     private val isOutput get() = outputId == null || outputId == self
@@ -143,7 +144,6 @@ class DeviceSyncPlayback @Inject constructor(
     private val live: Boolean
         get() = client.state.value.status == DeviceSyncClient.Status.Connected && !inSession()
 
-    private val connection get() = attached?.first
 
     private val listener = object : Player.Listener {
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -175,7 +175,6 @@ class DeviceSyncPlayback @Inject constructor(
     fun start() {
         if (started) return
         started = true
-        scope.launch { bridge.playerConnection.collect(::attach) }
         scope.launch { client.events.collect(::onEvent) }
         scope.launch { client.state.collect { onSessionChanged() } }
         scope.launch {
@@ -217,7 +216,7 @@ class DeviceSyncPlayback @Inject constructor(
         val id = nextCommandId()
         trackCommand(target, id, loadCommand(queue, index, position + lead))
         remote = Remote(target, nameOf(target), queue.getOrNull(index), queue, index, playing, position + lead, client.serverNow())
-        if (connection?.player?.playWhenReady == true) pauseQuietly()
+        if (player?.playWhenReady == true) pauseQuietly()
         publishUi()
     }
 
@@ -244,7 +243,7 @@ class DeviceSyncPlayback @Inject constructor(
                 .onSuccess(::onState)
                 .onFailure { Timber.tag(TAG).w(it, "Unreadable state") }
 
-            "client-hello" -> if (isOutput && connection?.player?.playWhenReady == true) broadcast(withQueue = true)
+            "client-hello" -> if (isOutput && player?.playWhenReady == true) broadcast(withQueue = true)
 
             "client-ack" -> if (data.string("to") == self) {
                 data.string("id")?.let { pending.remove(it)?.second?.cancel() }
@@ -265,7 +264,7 @@ class DeviceSyncPlayback @Inject constructor(
         if (!claims) return
 
         outputId = message.device
-        if (connection?.player?.playWhenReady == true) pauseQuietly()
+        if (player?.playWhenReady == true) pauseQuietly()
 
         val queue = message.queue ?: remote?.queue.orEmpty()
         if (message.queue == null && message.queueHash.isNotEmpty() && queueHash(queue.map { it.id }) != message.queueHash) {
@@ -288,6 +287,8 @@ class DeviceSyncPlayback @Inject constructor(
         val from = message.string("device") ?: return
         val id = message.string("id") ?: return
         val command = message["command"] as? JsonObject ?: return
+        // Unacknowledged, the sender retries and then plays it itself, rather than believing this phone did.
+        val player = player ?: return
         client.publish("client-ack", buildJsonObject {
             put("device", self)
             put("to", from)
@@ -297,8 +298,6 @@ class DeviceSyncPlayback @Inject constructor(
         if (!applied.add(id)) return
         if (applied.size > APPLIED_MEMORY) applied.remove(applied.first())
 
-        val connection = connection ?: return
-        val player = connection.player
         val kind = command.string("kind")
         if (kind == "queue") {
             replaceUpcoming(player, tracksOf(command), command.int("index") ?: return)
@@ -311,9 +310,9 @@ class DeviceSyncPlayback @Inject constructor(
 
         claimOutput(self)
         when (kind) {
-            "play" -> connection.play()
-            "pause" -> connection.pause()
-            "seek" -> command.double("position")?.let { connection.seekTo((it * 1000).toLong()) }
+            "play" -> play(player)
+            "pause" -> player.playWhenReady = false
+            "seek" -> command.double("position")?.let { player.seekTo((it * 1000).toLong()) }
             "shuffle" -> command.bool("value")?.let { player.shuffleModeEnabled = it }
             "repeat" -> player.repeatMode = repeatModeOf(command.string("value"))
             "load" -> {
@@ -337,8 +336,7 @@ class DeviceSyncPlayback @Inject constructor(
 
     private fun broadcast(withQueue: Boolean = false) {
         if (!live || !isOutput) return
-        val connection = connection ?: return
-        val player = connection.player
+        val player = player ?: return
         val current = player.currentMediaItem?.metadata ?: return
         // ponytail: a file on this phone means nothing to the other devices, so it is not announced at all.
         if (current.isLocalFile) return
@@ -364,7 +362,7 @@ class DeviceSyncPlayback @Inject constructor(
             index = index,
             position = player.currentPosition / 1000.0,
             at = client.serverNow(),
-            contextLabel = connection.queueTitle.value,
+            contextLabel = service?.queueTitle,
             shuffle = player.shuffleModeEnabled,
             repeat = when (player.repeatMode) {
                 Player.REPEAT_MODE_ALL -> "all"
@@ -376,17 +374,17 @@ class DeviceSyncPlayback @Inject constructor(
     }
 
     private fun load(queue: List<SyncTrack>, index: Int, positionSeconds: Double) {
-        val connection = connection ?: return
-        val player = connection.player
+        val service = service ?: return
+        val player = player ?: return
         val positionMs = (positionSeconds * 1000).toLong().coerceAtLeast(0L)
         val sameQueue = player.mediaItemCount == queue.size &&
             queue.indices.all { player.getMediaItemAt(it).mediaId == queue[it].id }
         if (sameQueue && player.currentMediaItemIndex == index) {
-            connection.seekTo(positionMs)
-            connection.play()
+            player.seekTo(positionMs)
+            play(player)
             return
         }
-        connection.playQueue(ListQueue(items = queue.map(::toMediaItem), startIndex = index, position = positionMs), force = true)
+        service.playQueue(ListQueue(items = queue.map(::toMediaItem), startIndex = index, position = positionMs))
     }
 
     /** Swaps what plays after the current song, leaving the song itself alone. */
@@ -401,7 +399,7 @@ class DeviceSyncPlayback @Inject constructor(
 
     private fun tick() {
         if (!live) return
-        val player = connection?.player
+        val player = player
         if (isOutput && player?.playWhenReady == true && player.currentMediaItem != null) {
             // Already playing when this device joined: say so, which makes it the output.
             if (outputId != self) claimOutput(self)
@@ -449,10 +447,26 @@ class DeviceSyncPlayback @Inject constructor(
         publishUi()
     }
 
-    private fun attach(connection: PlayerConnection?) {
-        attached?.second?.removeListener(listener)
-        attached = connection?.let { it to it.player }
-        attached?.second?.addListener(listener)
+    /** Called by [MusicService] as it starts and stops; the player inside it can be swapped while it runs. */
+    fun attachService(service: MusicService?) {
+        this.service = service
+        playerJob?.cancel()
+        playerJob = service?.let { scope.launch { it.playerFlow.collect(::attachPlayer) } }
+        if (service == null) attachPlayer(null)
+    }
+
+    private fun attachPlayer(next: Player?) {
+        player?.removeListener(listener)
+        player = next
+        next?.addListener(listener)
+    }
+
+    private fun play(player: Player) {
+        when (player.playbackState) {
+            Player.STATE_IDLE -> player.prepare()
+            Player.STATE_ENDED -> player.seekTo(player.currentMediaItemIndex, 0)
+        }
+        player.playWhenReady = true
     }
 
     private fun sendCommand(command: JsonObject) {
@@ -485,7 +499,7 @@ class DeviceSyncPlayback @Inject constructor(
 
     private fun pauseQuietly() {
         echoUntil = SystemClock.elapsedRealtime() + ECHO_GUARD_MS
-        connection?.pause()
+        player?.playWhenReady = false
     }
 
     private fun echoing() = SystemClock.elapsedRealtime() < echoUntil
@@ -495,7 +509,7 @@ class DeviceSyncPlayback @Inject constructor(
     /** What is playing right now, wherever it is playing. */
     private fun currentPlayback(): Playback? {
         remote?.let { return Playback(it.queue.ifEmpty { listOfNotNull(it.track) }, it.index, it.positionAt(client.serverNow()), it.isPlaying) }
-        val player = connection?.player ?: return null
+        val player = player ?: return null
         val items = (0 until player.mediaItemCount).mapNotNull { player.getMediaItemAt(it).metadata }
         if (items.isEmpty() || player.currentMediaItem?.metadata?.isLocalFile != false) return null
         val index = items.take(player.currentMediaItemIndex).count { !it.isLocalFile }
