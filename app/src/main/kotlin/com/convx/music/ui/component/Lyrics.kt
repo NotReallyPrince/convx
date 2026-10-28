@@ -524,7 +524,7 @@ fun Lyrics(
                 }
 
                 if (romanizeJapaneseLyrics && isJapanese(text) && !isChinese(text)) {
-                    scope.launch { newEntry.romanizedTextFlow.value = romanizeJapanese(text) }
+                    scope.launch { newEntry.romanizedTextFlow.value = romanizeJapanese(context, text) }
                 }
 
                 if (romanizeKoreanLyrics && isKorean(text)) {

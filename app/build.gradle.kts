@@ -85,8 +85,10 @@ android {
             buildConfigField("String", "ARCHITECTURE", "\"universal\"")
             // 64-bit only: MMKV (native KV store) ships no 32-bit binaries, so a
             // 32-bit slice would crash at load time. armeabi/x86 flavors removed.
+            // x86_64 dropped too: it doubled every native library (~29 MB) for emulators and
+            // Chromebooks, which have the x86_64 flavor. That leaves this the same as arm64.
             ndk {
-                abiFilters.addAll(listOf("arm64-v8a", "x86_64"))
+                abiFilters.add("arm64-v8a")
             }
         }
         create("arm64") {
@@ -222,6 +224,8 @@ android {
             excludes += "META-INF/LICENSE.md"
             excludes += "META-INF/INDEX.LIST"
             excludes += "META-INF/io.netty.versions.properties"
+            // ~33 MB Japanese dictionary; LyricsUtils downloads it on first use (RemoteAsset).
+            excludes += "com/atilika/kuromoji/ipadic/*.bin"
         }
     }
 }

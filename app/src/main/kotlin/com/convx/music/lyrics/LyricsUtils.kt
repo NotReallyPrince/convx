@@ -5,12 +5,24 @@
 
 package com.convx.music.lyrics
 
+import android.content.Context
 import android.text.format.DateUtils
+import com.atilika.kuromoji.dict.CharacterDefinitions
+import com.atilika.kuromoji.dict.ConnectionCosts
+import com.atilika.kuromoji.dict.InsertedDictionary
+import com.atilika.kuromoji.dict.TokenInfoDictionary
+import com.atilika.kuromoji.dict.UnknownDictionary
 import com.atilika.kuromoji.ipadic.Tokenizer
+import com.atilika.kuromoji.trie.DoubleArrayTrie
+import com.atilika.kuromoji.util.ResourceResolver
+import com.convx.music.utils.RemoteAsset
 import com.github.promeg.pinyinhelper.Pinyin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import timber.log.Timber
+import java.io.FileNotFoundException
 import java.util.Locale
+import java.util.zip.ZipFile
 
 @Suppress("RegExpRedundantEscape")
 object LyricsUtils {
@@ -322,7 +334,37 @@ object LyricsUtils {
 
     private fun isCyrillic(char: Char): Boolean = char in '\u0400'..'\u04FF'
 
-    private val kuromojiTokenizer: Tokenizer by lazy { Tokenizer() }
+    @Volatile private var kuromojiTokenizer: Tokenizer? = null
+
+    // The ipadic dictionary (~33 MB) is stripped from the APK and fetched on the first Japanese line.
+    private fun kuromojiTokenizer(context: Context): Tokenizer =
+        kuromojiTokenizer ?: synchronized(this) {
+            kuromojiTokenizer ?: ZipFile(RemoteAsset.get(context.filesDir, IPADIC_ZIP, IPADIC_SHA256))
+                .use { ZipDictionaryBuilder(it).build() }
+                .also { kuromojiTokenizer = it }
+        }
+
+    private const val IPADIC_ZIP = "kuromoji-ipadic-0.9.0.zip"
+    private const val IPADIC_SHA256 = "cea9bc0cf6a0ec57e1565e683a24c32b305ff1196dfb110f30dd574766bc59ce"
+
+    /**
+     * ipadic's Builder hardcodes a classpath resolver, so this repeats its loadDictionaries()
+     * against the downloaded zip. Every dictionary reads its stream fully, so the zip can close after.
+     */
+    private class ZipDictionaryBuilder(private val zip: ZipFile) : Tokenizer.Builder() {
+        override fun loadDictionaries() {
+            penalties = listOf(2, 3000, 7, 1700) // Tokenizer.Builder's default kanji/other penalties
+            resolver = ResourceResolver { name ->
+                zip.getInputStream(zip.getEntry(name) ?: throw FileNotFoundException(name))
+            }
+            doubleArrayTrie = DoubleArrayTrie.newInstance(resolver)
+            connectionCosts = ConnectionCosts.newInstance(resolver)
+            tokenInfoDictionary = TokenInfoDictionary.newInstance(resolver)
+            characterDefinitions = CharacterDefinitions.newInstance(resolver)
+            unknownDictionary = UnknownDictionary.newInstance(resolver, characterDefinitions, totalFeatures)
+            insertedDictionary = InsertedDictionary(totalFeatures)
+        }
+    }
 
     private val HEX_ENTITY_REGEX = "&#x([0-9a-fA-F]+);".toRegex()
     private val DEC_ENTITY_REGEX = "&#(\\d+);".toRegex()
@@ -639,8 +681,12 @@ object LyricsUtils {
         return romajiBuilder.toString().lowercase()
     }
 
-    suspend fun romanizeJapanese(text: String): String = withContext(Dispatchers.Default) {
-        val tokens = kuromojiTokenizer.tokenize(text)
+    /** Null while the dictionary can't be fetched; the line then shows without romanization. */
+    suspend fun romanizeJapanese(context: Context, text: String): String? = withContext(Dispatchers.IO) {
+        val tokenizer = runCatching { kuromojiTokenizer(context) }
+            .onFailure { Timber.w(it, "Japanese dictionary unavailable") }
+            .getOrNull() ?: return@withContext null
+        val tokens = tokenizer.tokenize(text)
         val romanizedTokens = tokens.mapIndexed { index, token ->
             val currentReading = if (token.reading.isNullOrEmpty() || token.reading == "*") {
                 token.surface

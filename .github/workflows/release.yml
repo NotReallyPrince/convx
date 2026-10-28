@@ -69,7 +69,7 @@ jobs:
         # The 16 GB runner can give R8 the full JIT and a parallel GC.
         run: |
           ./gradlew "-Dorg.gradle.jvmargs=-Xmx6g -XX:+UseParallelGC -XX:ReservedCodeCacheSize=256m -Dfile.encoding=UTF-8" \
-            assembleArm64GmsRelease assembleArm32GmsRelease assembleX86_64GmsRelease assembleUniversalGmsRelease \
+            assembleArm64GmsRelease assembleArm32GmsRelease assembleX86_64GmsRelease \
             --no-configuration-cache --console=plain --warning-mode summary -x lint
 
       - name: Publish GitHub release
@@ -79,7 +79,7 @@ jobs:
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VERSION="${TAG#v}"
           mkdir -p dist
-          for abi in arm64 arm32 x86_64 universal; do
+          for abi in arm64 arm32 x86_64; do
             apk=$(find "app/build/outputs/apk/${abi}Gms/release" -name '*.apk' | head -n 1)
             test -n "$apk" || { echo "no APK for $abi"; exit 1; }
             cp "$apk" "dist/convx-${VERSION}-${abi}.apk"

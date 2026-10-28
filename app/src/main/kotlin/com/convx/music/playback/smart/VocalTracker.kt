@@ -26,6 +26,7 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.util.Log
+import com.convx.music.utils.RemoteAsset
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -93,12 +94,8 @@ class VocalTracker(private val context: Context) {
         synchronized(lock) {
             session?.let { return it }
             return runCatching {
-                val file = File(context.filesDir, MODEL_ASSET)
-                if (!file.exists() || file.length() == 0L) {
-                    context.assets.open(MODEL_ASSET).use { input ->
-                        file.outputStream().use { output -> input.copyTo(output) }
-                    }
-                }
+                // Too big to bundle (~28 MB); installs that copied it out of older APKs keep their file.
+                val file = RemoteAsset.get(context.filesDir, MODEL_ASSET, MODEL_SHA256)
                 // One-time eviction of the retired open-unmix checkpoint (~9 MB).
                 File(context.filesDir, STALE_MODEL_ASSET).delete()
                 val options = OrtSession.SessionOptions().apply {
@@ -532,6 +529,7 @@ class VocalTracker(private val context: Context) {
     companion object {
         private const val TAG = "ConvxVocalTracker"
         private const val MODEL_ASSET = "uvr_mdxnet_9482.onnx"
+        private const val MODEL_SHA256 = "f4f365207c56deb115bceedff3ad8fe98a751c745f9e370cecec6226b8b47184"
         private const val STALE_MODEL_ASSET = "vocals_umxhq_int8.onnx"
         private const val INFERENCE_THREADS = 1
 
