@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import com.convx.music.core.updater.releaseApkName
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
@@ -40,9 +41,9 @@ object UpdateNotificationHelper {
 
         // Direct download URL format from convxupdater - use the full tag (vX.X.X or bX.X.X) or nightly link
         val apkUrl = if (versionName.contains("nightly", ignoreCase = true)) {
-            "https://nightly.link/cosmictaserdev-creator/Convx/workflows/nightly.yml/main/convx-gms-nightly.zip"
+            "https://nightly.link/NotReallyPrince/convx/workflows/nightly.yml/main/convx-gms-nightly.zip"
         } else {
-            "https://github.com/cosmictaserdev-creator/Convx/releases/download/$versionName/convx-$versionName.apk"
+            "https://github.com/NotReallyPrince/convx/releases/download/$versionName/${releaseApkName(versionName)}"
         }
         val intent = Intent(Intent.ACTION_VIEW, apkUrl.toUri())
 

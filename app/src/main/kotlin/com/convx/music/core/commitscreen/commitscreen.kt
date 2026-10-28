@@ -108,7 +108,7 @@ fun CommitScreen(
         hasError = false
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                val url = URL("https://api.github.com/repos/cosmictaserdev-creator/Convx/commits?branch=main&per_page=50")
+                val url = URL("https://api.github.com/repos/NotReallyPrince/convx/commits?branch=main&per_page=50")
                 val json = url.openStream().bufferedReader().use { it.readText() }
                 val array = JSONArray(json)
                 val outputFormatter = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.getDefault())

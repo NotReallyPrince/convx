@@ -226,6 +226,8 @@ android {
             excludes += "META-INF/io.netty.versions.properties"
             // ~33 MB Japanese dictionary; LyricsUtils downloads it on first use (RemoteAsset).
             excludes += "com/atilika/kuromoji/ipadic/*.bin"
+            // ~1.2 MB of BouncyCastle's post-quantum Picnic tables, pulled in by smbj, which never signs with Picnic.
+            excludes += "org/bouncycastle/pqc/legacy/picnic/*.properties"
         }
     }
 }

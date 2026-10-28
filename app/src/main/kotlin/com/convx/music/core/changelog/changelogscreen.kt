@@ -143,7 +143,7 @@ fun ChangelogScreen(
                         showingCached = true
                     }
                 } else {
-                    val changelogUrl = URL("https://github.com/cosmictaserdev-creator/Convx/releases/download/$tag/changelog.json")
+                    val changelogUrl = URL("https://github.com/NotReallyPrince/convx/releases/download/$tag/changelog.json")
                     val connection = changelogUrl.openConnection() as HttpURLConnection
                     connection.setRequestProperty("User-Agent", "Convx-Changelog-App")
                     connection.setRequestProperty("Accept", "application/json")
@@ -216,7 +216,7 @@ fun ChangelogScreen(
         isFetchingOldReleases = true
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                val releasesUrl = URL("https://api.github.com/repos/cosmictaserdev-creator/Convx/releases")
+                val releasesUrl = URL("https://api.github.com/repos/NotReallyPrince/convx/releases")
                 val connection = releasesUrl.openConnection() as HttpURLConnection
                 connection.setRequestProperty("User-Agent", "Convx-Changelog-App")
                 connection.setRequestProperty("Accept", "application/vnd.github+json")
