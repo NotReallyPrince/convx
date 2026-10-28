@@ -24,6 +24,15 @@ jobs:
         with:
           submodules: recursive
 
+      # versionCode comes from version.properties. A tag that doesn't match it publishes an APK that
+      # Android and the updater see as the version already installed.
+      - name: Check tag matches version.properties
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          . ./version.properties
+          test "${TAG#v}" = "$VERSION_MAJOR.$VERSION_MINOR.$VERSION_PATCH" || {
+            echo "Tag $TAG does not match version.properties ($VERSION_MAJOR.$VERSION_MINOR.$VERSION_PATCH)"; exit 1; }
+
       - name: Set up JDK 21
         uses: actions/setup-java@v5
         with:
