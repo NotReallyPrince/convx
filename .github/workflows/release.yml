@@ -65,8 +65,11 @@ jobs:
           STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        # gradle.properties tunes the daemon for small machines (C1-only JIT, serial GC), which makes R8 crawl.
+        # The 16 GB runner can give R8 the full JIT and a parallel GC.
         run: |
-          ./gradlew assembleArm64GmsRelease assembleArm32GmsRelease assembleX86_64GmsRelease assembleUniversalGmsRelease \
+          ./gradlew "-Dorg.gradle.jvmargs=-Xmx6g -XX:+UseParallelGC -XX:ReservedCodeCacheSize=256m -Dfile.encoding=UTF-8" \
+            assembleArm64GmsRelease assembleArm32GmsRelease assembleX86_64GmsRelease assembleUniversalGmsRelease \
             --no-configuration-cache --console=plain --warning-mode summary -x lint
 
       - name: Publish GitHub release
