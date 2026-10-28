@@ -61,6 +61,13 @@ fun IntegrationScreen(
                     onClick = {
                         navController.navigate("settings/integrations/lastfm")
                     }
+                ),
+                IntegrationCardItem(
+                    icon = painterResource(R.drawable.sync),
+                    title = { Text(stringResource(R.string.device_sync_integration)) },
+                    onClick = {
+                        navController.navigate("settings/integrations/device_sync")
+                    }
                 )
             )
         )

@@ -2,6 +2,7 @@
 <full-backup-content>
     <exclude domain="sharedpref" path="spotify_provider_credentials.xml" />
     <exclude domain="sharedpref" path="network_music_sources.xml" />
+    <exclude domain="sharedpref" path="music_device_sync.xml" />
     <exclude
         domain="file"
         path="./exoplayer" />

@@ -1434,4 +1434,17 @@
     <string name="jam_host_only_desc">Guests listen along but cannot pause, skip or change the queue.</string>
     <string name="jam_view_only">The host has turned off playback controls for guests.</string>
     <string name="jam_leave">Leave party</string>
+    <string name="device_sync_integration">Web player sync</string>
+    <string name="device_sync_pair_title">Link to the web player</string>
+    <string name="device_sync_pair_hint">On the web player, open your account and choose Link a device. Enter the code it shows, or paste the link.</string>
+    <string name="device_sync_code_label">Code or link</string>
+    <string name="device_sync_pair_action">Link</string>
+    <string name="device_sync_unpair_action">Unlink</string>
+    <string name="device_sync_devices">Devices</string>
+    <string name="device_sync_this_device">This device</string>
+    <string name="device_sync_status_signed_out">Not linked</string>
+    <string name="device_sync_status_connecting">Connecting…</string>
+    <string name="device_sync_status_connected">Connected</string>
+    <string name="device_sync_status_disabled">Sync is off</string>
+    <string name="device_sync_status_offline">Offline, retrying</string>
 </resources>

@@ -73,6 +73,9 @@ class App : Application(), SingletonImageLoader.Factory {
     @Inject
     lateinit var networkRepository: dagger.Lazy<com.convx.storage.data.NetworkMusicRepository>
 
+    @Inject
+    lateinit var deviceSync: dagger.Lazy<com.convx.music.devicesync.DeviceSyncClient>
+
     override fun onCreate() {
         super.onCreate()
         com.music.spotify.SpotifyAuth.initialize(this)
@@ -152,6 +155,9 @@ class App : Application(), SingletonImageLoader.Factory {
         applicationScope.launch(Dispatchers.IO) {
             cachedCoilCacheSize = dataStore.data.map { it[MaxImageCacheSizeKey] ?: 512 }.first()
         }
+
+        // Rejoins the web player's device list when this phone was paired before.
+        applicationScope.launch(Dispatchers.IO) { deviceSync.get().start() }
 
         applicationScope.launch {
             initializeSettings()
