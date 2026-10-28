@@ -17,7 +17,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -63,10 +65,11 @@ class DeviceSyncClient @Inject constructor(
     data class State(
         val status: Status = Status.SignedOut,
         val devices: List<Device> = emptyList(),
-        /** The newest `client-state` another device published, verbatim. */
-        val remotePlayback: JsonObject? = null,
         val message: String? = null,
     )
+
+    /** A `client-` event another device on this account published. */
+    data class Event(val name: String, val data: JsonObject)
 
     /** Raised for a refusal the user can act on; [signedOut] means the session no longer exists. */
     class SyncException(message: String, val signedOut: Boolean = false) : IOException(message)
@@ -81,7 +84,32 @@ class DeviceSyncClient @Inject constructor(
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
 
+    private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 64)
+    val events: SharedFlow<Event> = _events
+
     private var session: Job? = null
+
+    /** The joined socket and its channel; null until the channel accepts this device. */
+    @Volatile
+    private var joined: Pair<WebSocket, String>? = null
+
+    @Volatile
+    private var clockOffsetMs = 0L
+
+    /** The server's clock, which every device stamps playback with. */
+    fun serverNow(): Long = System.currentTimeMillis() + clockOffsetMs
+
+    /** Sends a `client-` event to the other devices; false while not joined. */
+    fun publish(event: String, data: JsonObject): Boolean {
+        val (socket, channel) = joined ?: return false
+        return socket.send(
+            buildJsonObject {
+                put("event", event)
+                put("channel", channel)
+                put("data", data)
+            }.toString()
+        )
+    }
 
     val deviceId: String = preferences.getString(KEY_DEVICE, null)
         ?: UUID.randomUUID().toString().also { preferences.edit().putString(KEY_DEVICE, it).apply() }
@@ -208,10 +236,13 @@ class DeviceSyncClient @Inject constructor(
                 closed.completeExceptionally(t as? IOException ?: IOException(t))
             }
         }
+        syncClock()
         val socket = http.newWebSocket(Request.Builder().url(config.url).build(), listener)
         try {
             closed.await()
         } finally {
+            joined = null
+            _state.update { it.copy(devices = emptyList()) }
             socket.close(1000, null)
         }
     }
@@ -238,9 +269,10 @@ class DeviceSyncClient @Inject constructor(
                         devices = hash.orEmpty().map { (id, info) -> deviceOf(id, info as? JsonObject) },
                     )
                 }
+                joined = socket to channel
                 onJoined()
                 // Asks whichever device is the output to describe the whole session now, not at its next heartbeat.
-                publish(socket, channel, "client-hello", buildJsonObject { put("device", deviceId) })
+                publish("client-hello", buildJsonObject { put("device", deviceId) })
             }
 
             "pusher_internal:subscription_error", "pusher:subscription_error" ->
@@ -258,10 +290,14 @@ class DeviceSyncClient @Inject constructor(
                 _state.update { state -> state.copy(devices = state.devices.filterNot { it.id == id }) }
             }
 
-            "client-state" -> {
+            // Sync was switched on or off somewhere; reconnecting re-reads the account's config.
+            "client-config" -> socket.close(1000, "config changed")
+
+            else -> {
+                val name = frame.string("event") ?: return
                 val message = data as? JsonObject ?: return
-                if (message.string("device") == deviceId) return
-                _state.update { it.copy(remotePlayback = message) }
+                if (!name.startsWith("client-") || message.string("device") == deviceId) return
+                _events.tryEmit(Event(name, message))
             }
         }
     }
@@ -298,14 +334,25 @@ class DeviceSyncClient @Inject constructor(
         }
     }
 
-    private fun publish(socket: WebSocket, channel: String, event: String, data: JsonObject) {
-        socket.send(
-            buildJsonObject {
-                put("event", event)
-                put("channel", channel)
-                put("data", data)
-            }.toString()
-        )
+    /** Keeps the sample with the shortest round trip, the one least skewed by transit. */
+    private fun syncClock() {
+        var best: Long? = null
+        var bestOffset = clockOffsetMs
+        repeat(CLOCK_SAMPLES) {
+            val sent = System.currentTimeMillis()
+            val now = runCatching {
+                execute(Request.Builder().url("$BASE_URL/api/realtime/time").build()) { response ->
+                    json.parseToJsonElement(response.body?.string().orEmpty()).jsonObject["now"]?.jsonPrimitive?.content?.toDouble()?.toLong()
+                }
+            }.getOrNull() ?: return@repeat
+            val received = System.currentTimeMillis()
+            val roundTrip = received - sent
+            if (best == null || roundTrip < best!!) {
+                best = roundTrip
+                bestOffset = now + roundTrip / 2 - received
+            }
+        }
+        clockOffsetMs = bestOffset
     }
 
     private fun deviceOf(id: String, info: JsonObject?) = Device(
@@ -341,6 +388,7 @@ class DeviceSyncClient @Inject constructor(
         const val MIN_BACKOFF_MS = 2_000L
         const val MAX_BACKOFF_MS = 60_000L
         const val DISABLED_RECHECK_MS = 5 * 60_000L
+        const val CLOCK_SAMPLES = 3
         val JSON_TYPE = "application/json".toMediaType()
     }
 }

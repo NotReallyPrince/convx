@@ -771,6 +771,8 @@ fun BottomSheetPlayer(
     var showRoutePopover by remember { mutableStateOf(false) }
     var showAudioDeviceBottomSheet by remember { mutableStateOf(false) }
     val enableGoogleCast by rememberPreference(EnableGoogleCastKey, defaultValue = true)
+    // The account's other devices are picked from the route popover, so it wins over the Cast button.
+    val hasSyncDevices = rememberDeviceSyncUi(rememberDeviceSyncPlayback()).let { it.live && it.devices.isNotEmpty() }
     var showInlineLyrics by remember {
         mutableStateOf(false)
     }
@@ -3138,7 +3140,7 @@ fun BottomSheetPlayer(
                                             .absoluteOffset(y = 30.dp)
                                             .widthIn(max = 110.dp),
                                     )
-                                } else if (BuildConfig.CAST_AVAILABLE && enableGoogleCast) {
+                                } else if (BuildConfig.CAST_AVAILABLE && enableGoogleCast && !hasSyncDevices) {
                                     CastButton(
                                         modifier = Modifier.size(48.dp),
                                         tintColor = bottomTint,

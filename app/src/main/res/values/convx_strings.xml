@@ -1447,4 +1447,10 @@
     <string name="device_sync_status_connected">Connected</string>
     <string name="device_sync_status_disabled">Sync is off</string>
     <string name="device_sync_status_offline">Offline, retrying</string>
+    <string name="device_sync_route_header">Your devices</string>
+    <string name="device_sync_playing_on">Playing on %1$s</string>
+    <string name="device_sync_play">Play</string>
+    <string name="device_sync_pause">Pause</string>
+    <string name="device_sync_next">Next</string>
+    <string name="device_sync_previous">Previous</string>
 </resources>

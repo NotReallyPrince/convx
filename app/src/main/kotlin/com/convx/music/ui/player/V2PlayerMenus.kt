@@ -291,6 +291,9 @@ fun V2RoutePopover(
     var routeVolume by remember {
         mutableFloatStateOf(audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC).toFloat())
     }
+    val sync = rememberDeviceSyncPlayback()
+    val syncState = rememberDeviceSyncUi(sync)
+    val remote = syncState.remote
     val menuStretch = androidx.compose.runtime.rememberCoroutineScope().let { scope ->
         remember(scope) { com.convx.music.ui.component.backdrop.catalog.utils.InteractiveHighlight(animationScope = scope, radiusScale = 0.6f, sheenAlpha = 0.06f, spotAlpha = 0.32f, releasePulse = true) }
     }
@@ -308,7 +311,7 @@ fun V2RoutePopover(
                 modifier = Modifier.padding(bottom = 6.dp),
             ) {
                 coil3.compose.AsyncImage(
-                    model = artworkUrl,
+                    model = if (remote != null) remote.track?.thumbnail else artworkUrl,
                     contentDescription = null,
                     contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                     modifier = Modifier
@@ -317,11 +320,12 @@ fun V2RoutePopover(
                 )
                 androidx.compose.foundation.layout.Spacer(Modifier.width(10.dp))
                 androidx.compose.foundation.layout.Column {
-                    com.convx.music.ui.ios.compat.Text(title, color = Color.White, fontSize = 17.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, maxLines = 1)
-                    com.convx.music.ui.ios.compat.Text(artist, color = Color.White, fontSize = 17.sp, maxLines = 1)
+                    com.convx.music.ui.ios.compat.Text(remote?.track?.title ?: title, color = Color.White, fontSize = 17.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, maxLines = 1)
+                    com.convx.music.ui.ios.compat.Text(remote?.let { deviceSyncRemoteLabel(it) } ?: artist, color = Color.White, fontSize = 17.sp, maxLines = 1)
                 }
             }
-            val automatic = service?.preferredDeviceId == null
+            // While another device is the output, nothing on this phone is playing.
+            val automatic = service?.preferredDeviceId == null && remote == null
             androidx.compose.foundation.layout.Box(
                 contentAlignment = androidx.compose.ui.Alignment.CenterStart,
                 modifier = Modifier
@@ -331,6 +335,7 @@ fun V2RoutePopover(
                     .background(Color.White.copy(alpha = if (automatic) 0.35f else 0.12f))
                     .clickable {
                         service?.setPreferredAudioDevice(null)
+                        if (remote != null) sync.playHere()
                         reload()
                         onDismiss()
                     },
@@ -365,7 +370,7 @@ fun V2RoutePopover(
             }
             devices.forEach { device ->
                 val active = device.isActive
-                val selected = active && !automatic
+                val selected = active && !automatic && remote == null
                 androidx.compose.foundation.layout.Box(
                     contentAlignment = androidx.compose.ui.Alignment.CenterStart,
                     modifier = Modifier
@@ -375,6 +380,7 @@ fun V2RoutePopover(
                         .background(Color.White.copy(alpha = if (selected) 0.35f else 0.12f))
                         .clickable {
                             service?.setPreferredAudioDevice(device.deviceId)
+                            if (remote != null) sync.playHere()
                             onDismiss()
                         },
                 ) {
@@ -408,6 +414,7 @@ fun V2RoutePopover(
                     }
                 }
             }
+            DeviceSyncRoutes(sync = sync, state = syncState, onDismiss = onDismiss)
             com.convx.music.core.VolumeControlRow(
                 label = stringResource(R.string.volume),
                 icon = androidx.compose.material.icons.Icons.Filled.VolumeUp,

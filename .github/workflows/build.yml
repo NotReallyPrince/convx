@@ -52,6 +52,9 @@ jobs:
         run: |
           ./gradlew assembleUniversalGmsDebug --no-configuration-cache --console=plain --warning-mode summary
 
+      - name: Device sync unit tests
+        run: ./gradlew :app:testUniversalGmsDebugUnitTest --tests 'com.convx.music.devicesync.*' --no-configuration-cache --console=plain
+
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:

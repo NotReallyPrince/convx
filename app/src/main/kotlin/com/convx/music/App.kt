@@ -76,6 +76,9 @@ class App : Application(), SingletonImageLoader.Factory {
     @Inject
     lateinit var deviceSync: dagger.Lazy<com.convx.music.devicesync.DeviceSyncClient>
 
+    @Inject
+    lateinit var deviceSyncPlayback: dagger.Lazy<com.convx.music.devicesync.DeviceSyncPlayback>
+
     override fun onCreate() {
         super.onCreate()
         com.music.spotify.SpotifyAuth.initialize(this)
@@ -157,7 +160,10 @@ class App : Application(), SingletonImageLoader.Factory {
         }
 
         // Rejoins the web player's device list when this phone was paired before.
-        applicationScope.launch(Dispatchers.IO) { deviceSync.get().start() }
+        applicationScope.launch(Dispatchers.IO) {
+            deviceSync.get().start()
+            deviceSyncPlayback.get().start()
+        }
 
         applicationScope.launch {
             initializeSettings()
