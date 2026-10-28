@@ -443,7 +443,10 @@ class DeviceSyncPlayback @Inject constructor(
     }
 
     private fun claimOutput(next: String) {
-        claimSeq += 1
+        // Server-clock seconds, not a count: a counter restarted at 1 whenever the system killed the
+        // app, and a browser that had reached 7 ignored every state from this phone as stale.
+        // Seconds fit the Int on the wire until 2038; +1 orders two claims within one second.
+        claimSeq = maxOf(claimSeq + 1, (client.serverNow() / 1000).toInt())
         outputId = next
         hasAnnounced = true
         if (next == self) remote = null
