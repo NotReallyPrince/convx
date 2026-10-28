@@ -254,6 +254,9 @@ class DeviceSyncPlayback @Inject constructor(
     }
 
     private fun onState(message: SyncState) {
+        // A remote repeating the play state it mirrors from this phone is not a claim. Taking it as
+        // one handed the output to a browser that only displays the song, and paused it here quietly.
+        if (message.output != message.device && message.output != ALL_DEVICES) return
         if (message.seq < claimSeq) return
         // A device that has not yet acknowledged a handover is still describing the old session.
         if (pending.values.any { it.first == message.device }) return

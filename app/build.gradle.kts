@@ -211,7 +211,9 @@ android {
 
     packaging {
         jniLibs {
-            useLegacyPackaging = false
+            // Compressed in the APK: 24.7 MB of .so becomes ~9.5 MB to download, at the cost of
+            // Android extracting them on install (~15 MB more on the device).
+            useLegacyPackaging = true
             keepDebugSymbols += listOf(
                 "**/libandroidx.graphics.path.so",
                 "**/libdatastore_shared_counter.so"
