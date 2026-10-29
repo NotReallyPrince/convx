@@ -107,6 +107,8 @@ import com.convx.music.constants.SongSortTypeKey
 import com.convx.music.db.entities.Artist
 import com.convx.music.db.entities.LocalItem
 import com.convx.music.db.entities.Song
+import com.convx.music.LocalSyncUtils
+import com.convx.music.extensions.isSyncEnabled
 import com.convx.music.extensions.toMediaItem
 import com.convx.music.playback.DownloadTarget
 import com.convx.music.playback.downloadSongs
@@ -157,9 +159,32 @@ internal fun AppleSubpage(
     state: LazyListState = rememberLazyListState(),
     trailing: @Composable RowScope.() -> Unit = {},
     overlay: @Composable BoxScope.() -> Unit = {},
+    // Pulls this page's items from the YouTube account: once on open, and on pull-to-refresh.
+    // The library screens this replaced synced on open; without it a signed-in library stayed
+    // empty until something else happened to run a sync.
+    onRefresh: (suspend () -> Unit)? = null,
     content: LazyListScope.() -> Unit,
 ) {
     BackHandler(onBack = onBack)
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var refreshing by remember { mutableStateOf(false) }
+    val pullState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+    val runRefresh: (Boolean) -> Unit = { visible ->
+        if (onRefresh != null && !refreshing) {
+            scope.launch {
+                // isSyncEnabled: the YouTube Music sync setting, and a signed-in account.
+                if (!context.isSyncEnabled()) return@launch
+                if (visible) refreshing = true
+                try {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { onRefresh() }
+                } finally {
+                    refreshing = false
+                }
+            }
+        }
+    }
+    androidx.compose.runtime.LaunchedEffect(Unit) { runRefresh(false) }
     val colors = IosTheme.colors
     val haze = remember { HazeState() }
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -180,6 +205,24 @@ internal fun AppleSubpage(
             .fillMaxSize()
             .background(colors.systemBackground),
     ) {
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            state = pullState,
+            isRefreshing = refreshing,
+            onRefresh = { runRefresh(true) },
+            modifier = Modifier.fillMaxSize(),
+            indicator = {
+                // Only while visible: the M3 indicator animates forever once composed.
+                if (onRefresh != null && (refreshing || pullState.distanceFraction > 0f)) {
+                    androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.LoadingIndicator(
+                        state = pullState,
+                        isRefreshing = refreshing,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = statusTop + com.convx.music.ui.component.TopBarContentHeight),
+                    )
+                }
+            },
+        ) {
         LazyColumn(
             state = state,
             modifier = Modifier
@@ -205,6 +248,7 @@ internal fun AppleSubpage(
                 )
             }
             content()
+        }
         }
 
         // Only as deep as the toolbar row (+8dp of fade): the large title sits right
@@ -399,7 +443,9 @@ fun ApplePlaylistsPage(navController: NavController, onBack: () -> Unit, viewMod
     val colors = IosTheme.colors
     val liked = stringResource(R.string.liked_songs)
 
+    val syncUtils = LocalSyncUtils.current
     AppleSubpage(
+        onRefresh = if (localOnly) null else suspend { syncUtils.get().syncSavedPlaylistsSuspend(); Unit },
         title = stringResource(R.string.filter_playlists),
         onBack = onBack,
         trailing = {
@@ -481,7 +527,9 @@ fun AppleArtistsPage(navController: NavController, onBack: () -> Unit, viewModel
     var sortType by rememberEnumPreference(ArtistSortTypeKey, ArtistSortType.NAME)
     var descending by rememberPreference(ArtistSortDescendingKey, false)
 
+    val syncUtils = LocalSyncUtils.current
     AppleSubpage(
+        onRefresh = if (localOnly) null else suspend { syncUtils.get().syncArtistsSubscriptionsSuspend(); Unit },
         title = stringResource(R.string.filter_artists),
         onBack = onBack,
         trailing = {
@@ -529,7 +577,9 @@ fun AppleAlbumsPage(navController: NavController, onBack: () -> Unit, viewModel:
     var sortType by rememberEnumPreference(AlbumSortTypeKey, AlbumSortType.NAME)
     var descending by rememberPreference(AlbumSortDescendingKey, false)
 
+    val syncUtils = LocalSyncUtils.current
     AppleSubpage(
+        onRefresh = if (localOnly) null else suspend { syncUtils.get().syncLikedAlbumsSuspend(); Unit },
         title = stringResource(R.string.filter_albums),
         onBack = onBack,
         trailing = {

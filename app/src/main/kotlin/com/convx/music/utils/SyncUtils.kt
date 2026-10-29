@@ -221,18 +221,19 @@ class SyncUtils @Inject constructor(
                 return@launch
             }
 
+            // One full sync at a time: app start and a Home refresh can both ask.
+            if (_syncState.value.overallStatus is SyncStatus.Syncing) return@launch
+
             val lastSync = context.dataStore.get(LastFullSyncKey, 0L)
             val currentTime = LocalDateTime.now().toEpochSecond(ZoneOffset.UTC)
             if (lastSync > 0 && (currentTime - lastSync) < SYNC_COOLDOWN) {
                 return@launch
             }
 
+            // The cooldown is stamped when a full sync completes (executeFullSync), not here:
+            // stamping on send let a failed sync block the next attempt for SYNC_COOLDOWN.
             startProcessingQueue()
             syncChannel.send(SyncOperation.FullSync)
-
-            context.dataStore.edit { settings ->
-                settings[LastFullSyncKey] = LocalDateTime.now().toEpochSecond(ZoneOffset.UTC)
-            }
         }
     }
 
@@ -391,6 +392,9 @@ class SyncUtils @Inject constructor(
             executeSyncAutoSyncPlaylists()
 
             updateState { copy(overallStatus = SyncStatus.Completed, currentOperation = "") }
+            context.dataStore.edit { settings ->
+                settings[LastFullSyncKey] = LocalDateTime.now().toEpochSecond(ZoneOffset.UTC)
+            }
             Timber.d("Full sync completed successfully")
         } catch (e: CancellationException) {
             throw e

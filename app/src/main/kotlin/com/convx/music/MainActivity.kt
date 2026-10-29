@@ -179,6 +179,11 @@ class MainActivity : ComponentActivity() {
                 }
         }
 
+        // Pull the YouTube library on each fresh start, not only on a Home pull-to-refresh.
+        // Signing in restarts the app, so this is also the sync that follows a sign-in.
+        // tryAutoSync skips itself when signed out, offline, sync is off, or within the cooldown.
+        if (savedInstanceState == null) syncUtils.get().tryAutoSync()
+
         // Cold launch from the launcher only (WelcomeActivity hands off with this extra);
         // notification/deep-link opens go straight to the app.
         val playIntro = savedInstanceState == null && intent.getBooleanExtra(EXTRA_PLAY_INTRO, false)

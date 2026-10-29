@@ -54,13 +54,11 @@ import com.convx.music.ui.ios.compat.Checkbox
 import com.convx.music.ui.ios.compat.Surface
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import com.convx.music.ui.ios.compat.FilledIconToggleButton
 import com.convx.music.ui.ios.compat.Icon
 import com.convx.music.ui.ios.compat.IconButton
 import com.convx.music.ui.ios.compat.LocalContentColor
 import com.convx.music.ui.ios.compat.AppTheme
 import com.convx.music.ui.ios.compat.OutlinedTextField
-import com.convx.music.ui.ios.compat.PlainTooltip
 import com.convx.music.ui.ios.compat.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SwipeToDismissBox
@@ -76,12 +74,8 @@ import com.composables.sfsymbols.monochrome.SFSquareAndPencil
 import com.composables.sfsymbols.monochrome.SFShuffle
 import com.composables.sfsymbols.monochrome.SFXmark
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TooltipAnchorPosition
-import androidx.compose.material3.TooltipBox
-import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.material3.rememberSwipeToDismissBoxState
-import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -149,7 +143,6 @@ import com.convx.music.LocalPlayerConnection
 import com.convx.music.LocalSyncUtils
 import com.convx.music.R
 import com.convx.music.constants.PendingPlaylistDeletesKey
-import com.convx.music.constants.PlaylistEditLockKey
 import com.convx.music.constants.PlaylistSongSortDescendingKey
 import com.convx.music.constants.PlaylistSongSortType
 import com.convx.music.constants.PlaylistSongSortTypeKey
@@ -271,7 +264,11 @@ fun LocalPlaylistScreen(
         PlaylistSongSortDescendingKey,
         true
     )
-    var locked by rememberPreference(PlaylistEditLockKey, defaultValue = true)
+    // Edit mode, per playlist and per visit: drag handles and remove buttons show only while
+    // editing. It replaced a lock icon that was one global setting for every playlist and
+    // easy to miss, which made reordering look like a missing feature.
+    var editing by rememberSaveable { mutableStateOf(false) }
+    val locked = !editing
 
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -712,23 +709,23 @@ fun LocalPlaylistScreen(
                                 modifier = Modifier.weight(1f),
                             )
                             if (editable) {
-                                val description = if (locked) "Unlock playlist" else "Lock playlist"
-                                TooltipBox(
-                                    positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
-                                    tooltip = { PlainTooltip { Text(description) } },
-                                    state = rememberTooltipState(),
-                                ) {
-                                    FilledIconToggleButton(
-                                        checked = locked,
-                                        onCheckedChange = { locked = it },
-                                        modifier = Modifier.padding(horizontal = 6.dp),
-                                    ) {
-                                        if (locked) {
-                                            SymbolIcon(symbol = sf("SFLock"), contentDescription = description)
-                                        } else {
-                                            SymbolIcon(symbol = sf("SFLockOpen"), contentDescription = description)
+                                // iOS Edit / Done. Reordering needs the playlist's own order, so
+                                // Edit switches the sort to Custom rather than offering handles
+                                // that would do nothing.
+                                androidx.compose.material3.TextButton(
+                                    onClick = {
+                                        if (!editing && sortType != PlaylistSongSortType.CUSTOM) {
+                                            onSortTypeChange(PlaylistSongSortType.CUSTOM)
                                         }
-                                    }
+                                        editing = !editing
+                                    },
+                                    modifier = Modifier.padding(horizontal = 6.dp),
+                                ) {
+                                    Text(
+                                        text = stringResource(if (editing) R.string.done else R.string.edit),
+                                        fontWeight = if (editing) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = onTint,
+                                    )
                                 }
                             }
                         }
@@ -819,6 +816,26 @@ fun LocalPlaylistScreen(
                                         checked = selection.contains(song.map.id),
                                         onCheckedChange = onCheckedChange
                                     )
+                                } else if (editing && editable) {
+                                    // Remove, as on iOS, in place of the overflow menu while editing.
+                                    IconButton(onClick = { deleteFromPlaylist() }) {
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier
+                                                .size(22.dp)
+                                                .background(Color(0xFFFF3B30), CircleShape),
+                                        ) {
+                                            SymbolIcon(symbol = sf("minus"), contentDescription = stringResource(R.string.remove_from_playlist), size = 14.dp, tint = Color.White)
+                                        }
+                                    }
+                                    if (sortType == PlaylistSongSortType.CUSTOM && !isSearching) {
+                                        IconButton(
+                                            onClick = { },
+                                            modifier = Modifier.draggableHandle(),
+                                        ) {
+                                            SymbolIcon(symbol = sf("SFLine3Horizontal"), contentDescription = null)
+                                        }
+                                    }
                                 } else {
                                     IconButton(
                                         onClick = {
