@@ -8,6 +8,8 @@
 package com.convx.music.devicesync
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
 import com.convx.music.di.ApplicationScope
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -16,6 +18,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,6 +28,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -55,7 +59,7 @@ import javax.inject.Singleton
 
 @Singleton
 class DeviceSyncClient @Inject constructor(
-    @ApplicationContext context: Context,
+    @ApplicationContext private val context: Context,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
     enum class Status { SignedOut, Connecting, Connected, Disabled, Offline }
@@ -79,7 +83,16 @@ class DeviceSyncClient @Inject constructor(
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
+        // A socket the network dropped without a word (Wi-Fi power saving with the screen off, a
+        // router timing out an idle connection) otherwise looks open forever: nothing is read, and
+        // with no read timeout nothing fails. An unanswered ping fails it, and the loop reconnects.
+        .pingInterval(PING_INTERVAL_S, TimeUnit.SECONDS)
         .build()
+
+    /** Set when the network comes back, to cut a reconnect backoff short. */
+    private val networkBack = Channel<Unit>(Channel.CONFLATED)
+    @Volatile private var openSocket: WebSocket? = null
+    private var watchingNetwork = false
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
@@ -119,7 +132,33 @@ class DeviceSyncClient @Inject constructor(
     /** Reconnects a device paired in an earlier run. Safe to call repeatedly. */
     fun start() {
         if (token == null || session?.isActive == true) return
+        watchNetwork()
         session = scope.launch(Dispatchers.IO) { keepConnected() }
+    }
+
+    /*
+     * Reconnect the moment there is a network again, rather than at the end of a backoff that can
+     * have grown to a minute. And on a switch to a different network (Wi-Fi to mobile data), drop
+     * the socket at once: it was bound to the old one and is already dead.
+     */
+    private fun watchNetwork() {
+        if (watchingNetwork) return
+        val connectivity = context.getSystemService(ConnectivityManager::class.java) ?: return
+        watchingNetwork = true
+        connectivity.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+            private var current: Network? = null
+
+            override fun onAvailable(network: Network) {
+                val previous = current
+                current = network
+                if (previous != null && previous != network) openSocket?.cancel()
+                networkBack.trySend(Unit)
+            }
+
+            override fun onLost(network: Network) {
+                if (network == current) openSocket?.cancel()
+            }
+        })
     }
 
     /**
@@ -178,8 +217,8 @@ class DeviceSyncClient @Inject constructor(
                 Timber.tag(TAG).w(e, "Device sync dropped")
                 _state.update { it.copy(status = Status.Offline, devices = emptyList(), message = null) }
             }
-            // ponytail: plain backoff, no connectivity callback; reconnects within a minute of the network returning.
-            delay(backoffMs)
+            // Cut short when the network comes back; see watchNetwork().
+            withTimeoutOrNull(backoffMs) { networkBack.receive() }
             backoffMs = (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)
         }
     }
@@ -238,9 +277,11 @@ class DeviceSyncClient @Inject constructor(
         }
         syncClock()
         val socket = http.newWebSocket(Request.Builder().url(config.url).build(), listener)
+        openSocket = socket
         try {
             closed.await()
         } finally {
+            openSocket = null
             joined = null
             _state.update { it.copy(devices = emptyList()) }
             socket.close(1000, null)
@@ -385,6 +426,7 @@ class DeviceSyncClient @Inject constructor(
         const val PREFERENCES = "music_device_sync"
         const val KEY_TOKEN = "session"
         const val KEY_DEVICE = "device_id"
+        const val PING_INTERVAL_S = 20L
         const val MIN_BACKOFF_MS = 2_000L
         const val MAX_BACKOFF_MS = 60_000L
         const val DISABLED_RECHECK_MS = 5 * 60_000L
