@@ -107,6 +107,11 @@ class SyncUtils @Inject constructor(
     private var processingJob: Job? = null
     private val playlistUploadMutex = Mutex()
 
+    // One saved-playlists sync at a time. A new playlist gets a fresh local id, so two runs
+    // overlapping (app start, the Playlists page, a pull-to-refresh) each found no copy and
+    // inserted their own — every playlist showed up once per overlapping run.
+    private val savedPlaylistsMutex = Mutex()
+
     private val _syncState = MutableStateFlow(SyncState())
     val syncState: StateFlow<SyncState> = _syncState.asStateFlow()
 
@@ -860,9 +865,17 @@ class SyncUtils @Inject constructor(
     }
 
     private suspend fun executeSyncSavedPlaylists() = withContext(Dispatchers.IO) {
+        savedPlaylistsMutex.withLock {
+            syncSavedPlaylistsLocked()
+            // Also clears the copies earlier overlapping runs already left behind.
+            executeCleanupDuplicatePlaylists()
+        }
+    }
+
+    private suspend fun syncSavedPlaylistsLocked() {
         if (!isLoggedIn()) {
             Timber.w("Skipping syncSavedPlaylists - user not logged in")
-            return@withContext
+            return
         }
 
         updateState { copy(playlists = SyncStatus.Syncing, currentOperation = "Syncing saved playlists") }
