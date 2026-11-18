@@ -172,7 +172,7 @@ class DeviceSyncClient @Inject constructor(
             if (linkToken != null) put("token", linkToken) else put("code", trimmed.uppercase())
         }
         val request = Request.Builder()
-            .url("$BASE_URL/api/music/link/claim")
+            .url("${baseUrl()}/api/music/link/claim")
             .post(body.toString().toRequestBody(JSON_TYPE))
             .build()
         val sessionToken = execute(request) { response ->
@@ -227,7 +227,7 @@ class DeviceSyncClient @Inject constructor(
 
     /** Null when the account has sync switched off, or the server has no socket. */
     private fun fetchConfig(): SocketConfig? {
-        val request = authorized(Request.Builder().url("$BASE_URL/api/music/sync")).build()
+        val request = authorized(Request.Builder().url("${baseUrl()}/api/music/sync")).build()
         val body = execute(request) { response ->
             if (!response.isSuccessful) throw SyncException("The music server answered ${response.code}.")
             json.parseToJsonElement(response.body?.string().orEmpty()).jsonObject
@@ -345,7 +345,7 @@ class DeviceSyncClient @Inject constructor(
 
     private fun subscribe(socket: WebSocket, channel: String, socketId: String) {
         try {
-            val url = "$BASE_URL/api/music/sync/auth".toHttpUrl().newBuilder()
+            val url = "${baseUrl()}/api/music/sync/auth".toHttpUrl().newBuilder()
                 .addQueryParameter("device", deviceId)
                 .addQueryParameter("name", "${Build.MODEL} · Convx")
                 .addQueryParameter("kind", "mobile")
@@ -382,7 +382,7 @@ class DeviceSyncClient @Inject constructor(
         repeat(CLOCK_SAMPLES) {
             val sent = System.currentTimeMillis()
             val now = runCatching {
-                execute(Request.Builder().url("$BASE_URL/api/realtime/time").build()) { response ->
+                execute(Request.Builder().url("${baseUrl()}/api/realtime/time").build()) { response ->
                     json.parseToJsonElement(response.body?.string().orEmpty()).jsonObject["now"]?.jsonPrimitive?.content?.toDouble()?.toLong()
                 }
             }.getOrNull() ?: return@repeat
@@ -421,6 +421,38 @@ class DeviceSyncClient @Inject constructor(
     private companion object {
         const val TAG = "DeviceSync"
         const val BASE_URL = "https://music.princeprajapati.dev"
+
+        /**
+         * The same server on its free fallback domain: every /api route device
+         * sync uses works there too, so if the main domain ever lapses sync
+         * keeps going without an app update.
+         */
+        const val FALLBACK_URL = "https://princeprajapati.is-a.dev"
+
+        @Volatile private var chosen: String? = null
+
+        /**
+         * The address to use: the main one if it answers, else the fallback.
+         * Checked once per process (a quick probe off the main thread, where
+         * all of this client's requests already run), then reused.
+         */
+        fun baseUrl(): String {
+            chosen?.let { return it }
+            synchronized(this) {
+                chosen?.let { return it }
+                val probe = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                val picked = listOf(BASE_URL, FALLBACK_URL).firstOrNull { candidate ->
+                    runCatching {
+                        probe.newCall(okhttp3.Request.Builder().url("$candidate/api/realtime/time").build()).execute().use { it.code < 500 }
+                    }.getOrDefault(false)
+                } ?: BASE_URL
+                chosen = picked
+                return picked
+            }
+        }
         const val SESSION_COOKIE = "music_session"
         /** Excluded from backups: the session it holds signs in as the linked account. */
         const val PREFERENCES = "music_device_sync"
